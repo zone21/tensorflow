@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/tf2xla_util.h"
 #include "tensorflow/compiler/xla/client/client_library.h"
 #include "tensorflow/compiler/xla/client/compile_only_client.h"
+#include "tensorflow/compiler/xla/client/xla_computation.h"
 #include "tensorflow/compiler/xla/service/cpu/cpu_compiler.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
@@ -55,8 +56,8 @@ Status CompileXla(xla::CompileOnlyClient* client,
     return errors::Unknown("Couldn't get XLA program shape: ",
                            pshape_or.status().error_message());
   }
-  compile_result->program_shape = *pshape_or.ValueOrDie();
-  xla::ProgramShape* pshape = &compile_result->program_shape;
+  compile_result->program_shape = pshape_or.ValueOrDie()->ToProto();
+  xla::ProgramShapeProto* pshape = &compile_result->program_shape;
   std::vector<const xla::Shape*> arg_layouts;
   arg_layouts.reserve(pshape->parameters_size());
   for (int i = 0; i < pshape->parameters_size(); ++i) {

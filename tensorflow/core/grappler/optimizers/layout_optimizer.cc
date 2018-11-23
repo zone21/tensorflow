@@ -119,6 +119,8 @@ std::set<string> GetOpsFormatAgnostic() {
                                           "Exit",
                                           "Exp",
                                           "Expm1",
+                                          "FakeQuantWithMinMaxVars",
+                                          "FakeQuantWithMinMaxArgs",
                                           "Fill",
                                           "Floor",
                                           "FloorDiv",
@@ -161,6 +163,8 @@ std::set<string> GetOpsFormatAgnostic() {
                                           "PreventGradient",
                                           "Prod",
                                           "Polygamma",
+                                          "QuantizeAndDequantizeV2",
+                                          "QuantizeAndDequantizeV3",
                                           "Pow",
                                           "Real",
                                           "RealDiv",
@@ -499,6 +503,7 @@ class NodeProcessor : public GraphProcessor {
       UpdateAttrDataFormat();
       UpdateAttrKSize();
       UpdateAttrStrides();
+      UpdateAttrDilations();
       UpdateAttrShape();
       TF_RETURN_IF_ERROR(AddLayoutTransposeToInputs());
       TF_RETURN_IF_ERROR(AddLayoutTransposeToOutputs());
@@ -738,6 +743,13 @@ class NodeProcessor : public GraphProcessor {
   void UpdateAttrStrides() {
     if (node_->attr().find("strides") != node_->attr().end()) {
       auto list = node_->mutable_attr()->at("strides").mutable_list();
+      UpdateTuple(list);
+    }
+  }
+
+  void UpdateAttrDilations() {
+    if (node_->attr().find("dilations") != node_->attr().end()) {
+      auto list = node_->mutable_attr()->at("dilations").mutable_list();
       UpdateTuple(list);
     }
   }
@@ -2180,6 +2192,7 @@ Status LayoutOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
     *output = item.graph;
     return status;
   }
+  GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
 
   TuningConfig config;
   config.no_gemm = true;

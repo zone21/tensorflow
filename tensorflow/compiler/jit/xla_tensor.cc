@@ -18,7 +18,7 @@ limitations under the License.
 
 namespace tensorflow {
 
-/*static*/ XlaTensor* XlaTensor::FromTensor(Tensor* tensor) {
+/*static*/ XlaTensor* XlaTensor::FromTensor(const Tensor* tensor) {
   if (tensor->NumElements() == 0) {
     return nullptr;
   }
@@ -27,8 +27,8 @@ namespace tensorflow {
   return xla_tensor;
 }
 
-/*static*/ const XlaTensor* XlaTensor::FromTensor(const Tensor* tensor) {
-  return FromTensor(const_cast<Tensor*>(tensor));
+/*static*/ bool XlaTensor::RefCountIsOne(const Tensor& tensor) {
+  return tensor.RefCountIsOne();
 }
 
 /*static*/ se::DeviceMemoryBase XlaTensor::DeviceMemoryFromTensor(
@@ -43,11 +43,10 @@ namespace tensorflow {
   }
 }
 
-Status XlaTensor::AllocateShapedBuffer(DataType dtype, const TensorShape& shape,
+Status XlaTensor::AllocateShapedBuffer(DataType dtype,
+                                       const xla::Shape& on_host_shape,
                                        xla::LocalClient* client,
                                        int device_ordinal) {
-  xla::Shape on_host_shape;
-  TF_RETURN_IF_ERROR(TensorShapeToXLAShape(dtype, shape, &on_host_shape));
   xla::Shape on_device_shape =
       client->backend().transfer_manager()->HostShapeToDeviceShape(
           on_host_shape);
@@ -67,8 +66,35 @@ Status XlaTensor::AllocateShapedBuffer(DataType dtype, const TensorShape& shape,
     index_to_buffer.second = buffer.Forget();
   }
 
+  VLOG(4) << shaped_buffer.ToString();
+
   set_shaped_buffer(std::move(shaped_buffer));
   return Status::OK();
+}
+
+void XlaTensor::WaitForDefinitionEventOnStream(se::Stream* stream) {
+  mutex_lock lock(mu_);
+  if (!definition_event_) {
+    return;
+  }
+
+  // The set of defined streams is expected to be very small indeed (usually
+  // 1-2), so a simple linear scan should be fast enough.
+  if (std::find(streams_defined_on_.begin(), streams_defined_on_.end(),
+                stream) != streams_defined_on_.end()) {
+    // stream is in streams_defined_on_; it doesn't need to be waited on.
+    return;
+  }
+
+  stream->ThenWaitFor(definition_event_.get());
+  streams_defined_on_.push_back(stream);
+}
+
+void XlaTensor::ResetDefinitionEvent(std::shared_ptr<se::Event> event,
+                                     se::Stream* stream) {
+  mutex_lock lock(mu_);
+  definition_event_ = std::move(event);
+  streams_defined_on_ = {stream};
 }
 
 // The pointer tag, OR-ed into the XlaTensor's address to distinguish it from

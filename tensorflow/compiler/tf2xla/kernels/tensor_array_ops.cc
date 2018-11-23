@@ -25,7 +25,8 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
 #include "tensorflow/compiler/tf2xla/xla_resource.h"
-#include "tensorflow/compiler/xla/literal_util.h"
+#include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/partial_tensor_shape.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -121,12 +122,12 @@ Status GetTensorArrayShape(const XlaResource* resource,
 // relevant slice of 'operand'.
 xla::XlaOp DynamicAddSlice(xla::XlaBuilder* builder, const xla::XlaOp& operand,
                            const xla::XlaOp& update,
-                           const gtl::ArraySlice<int64>& update_dims,
-                           const xla::XlaOp& start_indices) {
-  xla::XlaOp current =
-      builder->DynamicSlice(operand, start_indices, update_dims);
-  xla::XlaOp sum = builder->Add(current, update);
-  return builder->DynamicUpdateSlice(operand, sum, start_indices);
+                           absl::Span<const int64> update_dims,
+                           const xla::XlaOp& start_indices, DataType dtype) {
+  xla::XlaOp current = xla::DynamicSlice(operand, start_indices, update_dims);
+  xla::XlaOp sum =
+      dtype == DT_BOOL ? xla::Or(current, update) : xla::Add(current, update);
+  return xla::DynamicUpdateSlice(operand, sum, start_indices);
 }
 
 class TensorArrayOp : public XlaOpKernel {
@@ -162,12 +163,12 @@ class TensorArrayOp : public XlaOpKernel {
       ta_shape.AddDim(size);
       ta_shape.AppendShape(shape);
       xla::XlaOp zero = XlaHelpers::Zero(b, dtype_);
-      value = b->Broadcast(zero, ta_shape.dim_sizes());
+      value = xla::Broadcast(zero, ta_shape.dim_sizes());
     }
 
     XlaContext& xc = XlaContext::Get(ctx);
     XlaResource* var;
-    string name = strings::StrCat("TensorArray: ", tensor_array_name_);
+    string name = absl::StrCat("TensorArray: ", tensor_array_name_);
     OP_REQUIRES_OK(
         ctx, xc.CreateResource(XlaResource::kTensorArray, -1, std::move(name),
                                dtype_, shape, value, /*tensor_array_size=*/size,
@@ -187,7 +188,7 @@ class TensorArrayOp : public XlaOpKernel {
   TF_DISALLOW_COPY_AND_ASSIGN(TensorArrayOp);
 };
 
-REGISTER_XLA_OP(Name("TensorArrayV3").CompileTimeConstInput("size"),
+REGISTER_XLA_OP(Name("TensorArrayV3").CompileTimeConstantInput("size"),
                 TensorArrayOp);
 
 class TensorArrayWriteOp : public XlaOpKernel {
@@ -215,16 +216,23 @@ class TensorArrayWriteOp : public XlaOpKernel {
 
     // start_indices of the DynamicUpdateSlice are [index, 0, 0, ..., 0].
     auto start_indices =
-        b->Pad(b->Reshape(index, {1}), b->ConstantR0<int32>(0),
-               xla::MakeEdgePaddingConfig({{0, elem_shape.dims()}}));
+        xla::Pad(xla::Reshape(index, {1}), xla::ConstantR0<int32>(b, 0),
+                 xla::MakeEdgePaddingConfig({{0, elem_shape.dims()}}));
 
     TensorShape slice_shape = elem_shape;
     slice_shape.InsertDim(0, 1LL);
-    auto update = b->Reshape(value, slice_shape.dim_sizes());
+    auto update = xla::Reshape(value, slice_shape.dim_sizes());
 
-    xla::XlaOp written =
-        DynamicAddSlice(b, ta, update, slice_shape.dim_sizes(), start_indices);
-
+    xla::XlaOp written;
+    if (resource->tensor_array_multiple_writes_aggregate()) {
+      written = DynamicAddSlice(b, ta, update, slice_shape.dim_sizes(),
+                                start_indices, dtype_);
+    } else {
+      // TODO(b/117569591): Ideally we would report an error in the case that we
+      // see multiple writes to the same offset. Unfortunately there is no way
+      // to report errors at the moment, so we silently overwrite.
+      written = xla::DynamicUpdateSlice(ta, update, start_indices);
+    }
     OP_REQUIRES_OK(ctx, resource->SetValue(written));
     ctx->SetOutput(0, flow);
   }
@@ -259,17 +267,17 @@ class TensorArrayReadOp : public XlaOpKernel {
 
     // start_indices of the DynamicSlice are [index, 0, 0, ..., 0].
     auto start_indices =
-        b->Pad(b->Reshape(index, {1}), b->ConstantR0<int32>(0),
-               xla::MakeEdgePaddingConfig({{0, ta_shape.dims() - 1}}));
+        xla::Pad(xla::Reshape(index, {1}), xla::ConstantR0<int32>(b, 0),
+                 xla::MakeEdgePaddingConfig({{0, ta_shape.dims() - 1}}));
 
     auto slice_shape = ta_shape.dim_sizes();
     slice_shape[0] = 1LL;
 
-    xla::XlaOp read = b->DynamicSlice(ta, start_indices, slice_shape);
+    xla::XlaOp read = xla::DynamicSlice(ta, start_indices, slice_shape);
 
     // Remove the leading '1' dimension.
     std::vector<int64> value_shape(slice_shape.begin() + 1, slice_shape.end());
-    ctx->SetOutput(0, b->Reshape(read, value_shape));
+    ctx->SetOutput(0, xla::Reshape(read, value_shape));
   }
 
  private:
@@ -326,7 +334,7 @@ class TensorArrayGatherOp : public XlaOpKernel {
         for (auto i = 1; i < ta_shape.dims(); i++) {
           end[i] = ta_shape.dim_size(i);
         }
-        ctx->SetOutput(0, b->Slice(ta, begin, end, strides));
+        ctx->SetOutput(0, xla::Slice(ta, begin, end, strides));
         return;
       }
     }
@@ -391,7 +399,11 @@ class TensorArrayScatterOp : public XlaOpKernel {
     }
 
     if (scatter_all_elements_in_order) {
-      ta = b->Add(ta, value);
+      if (dtype_ == DT_BOOL) {
+        ta = xla::Or(ta, value);
+      } else {
+        ta = xla::Add(ta, value);
+      }
     } else {
       auto slice_dims = value_shape.dim_sizes();
       slice_dims[0] = 1LL;
@@ -407,14 +419,14 @@ class TensorArrayScatterOp : public XlaOpKernel {
         // Slice out part of the value.
         value_starts[0] = i;
         value_ends[0] = i + 1;
-        auto slice = b->Slice(value, value_starts, value_ends, value_strides);
+        auto slice = xla::Slice(value, value_starts, value_ends, value_strides);
 
         // start_indices of the DynamicUpdateSlice are [index, 0, 0, ..., 0].
-        auto index = b->Slice(indices, {i}, {i + 1}, {1});
+        auto index = xla::Slice(indices, {i}, {i + 1}, {1});
         auto start_indices =
-            b->Pad(b->Reshape(index, {1}), b->ConstantR0<int32>(0),
-                   xla::MakeEdgePaddingConfig({{0, elem_shape.dims()}}));
-        ta = DynamicAddSlice(b, ta, slice, slice_dims, start_indices);
+            xla::Pad(xla::Reshape(index, {1}), xla::ConstantR0<int32>(b, 0),
+                     xla::MakeEdgePaddingConfig({{0, elem_shape.dims()}}));
+        ta = DynamicAddSlice(b, ta, slice, slice_dims, start_indices, dtype_);
       }
     }
 
@@ -452,7 +464,7 @@ class TensorArrayConcatOp : public XlaOpKernel {
     auto ta_dims = ta_shape.dim_sizes();
     std::vector<int64> shape(ta_dims.begin() + 1, ta_dims.end());
     shape[0] *= ta_shape.dim_size(0);
-    ctx->SetOutput(0, b->Reshape(ta, shape));
+    ctx->SetOutput(0, xla::Reshape(ta, shape));
 
     Tensor lengths(DT_INT64, {ta_dims[0]});
     auto lengths_vec = lengths.vec<int64>();
@@ -522,8 +534,13 @@ class TensorArraySplitOp : public XlaOpKernel {
                                         value_shape.DebugString(), " vs. ",
                                         ta_shape.DebugString()));
 
-    OP_REQUIRES_OK(ctx, resource->SetValue(b->Add(
-                            ta, b->Reshape(value, ta_shape.dim_sizes()))));
+    const xla::XlaOp reshape = xla::Reshape(value, ta_shape.dim_sizes());
+    if (dtype_ == DT_BOOL) {
+      ta = xla::Or(ta, reshape);
+    } else {
+      ta = xla::Add(ta, reshape);
+    }
+    OP_REQUIRES_OK(ctx, resource->SetValue(ta));
 
     ctx->SetOutput(0, flow);
   }
@@ -534,7 +551,7 @@ class TensorArraySplitOp : public XlaOpKernel {
   TF_DISALLOW_COPY_AND_ASSIGN(TensorArraySplitOp);
 };
 
-REGISTER_XLA_OP(Name("TensorArraySplitV3").CompileTimeConstInput("lengths"),
+REGISTER_XLA_OP(Name("TensorArraySplitV3").CompileTimeConstantInput("lengths"),
                 TensorArraySplitOp);
 
 class TensorArraySizeOp : public XlaOpKernel {

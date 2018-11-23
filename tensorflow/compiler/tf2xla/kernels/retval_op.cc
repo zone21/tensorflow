@@ -13,10 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/compiler/tf2xla/shape_util.h"
 #include "tensorflow/compiler/tf2xla/xla_context.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "tensorflow/compiler/xla/client/xla_client/xla_builder.h"
+#include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/core/framework/kernel_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 
@@ -45,44 +47,8 @@ class RetvalOp : public XlaOpKernel {
       // compilation.
       OP_REQUIRES_OK(ctx, frame->SetRetval(index_, input));
     } else {
-      xla::XlaOp input = ctx->Input(0);
-      const TensorShape input_shape = ctx->InputShape(0);
-
-      auto is_constant = ctx->builder()->IsConstant(input);
-      if (!is_constant.ok()) {
-        ctx->SetStatus(is_constant.status());
-        return;
-      }
-
-      XlaContext& tc = XlaContext::Get(ctx);
-      if (tc.resolve_compile_time_constants() &&
-          (input_shape.num_elements() == 0 || is_constant.ValueOrDie())) {
-        xla::Literal literal;
-        OP_REQUIRES_OK(ctx, ctx->ConstantInput(0, &literal));
-        OP_REQUIRES_OK(ctx, tc.AddConstRetval(index_, dtype_, literal));
-      } else {
-        TensorShape shape = ctx->InputShape(0);
-        TensorShape representation_shape =
-            tc.is_entry_computation()
-                ? tc.RepresentationShape(shape, ctx->input_type(0))
-                : shape;
-
-        xla::XlaOp output = input;
-        if (tc.is_entry_computation()) {
-          output =
-              ctx->builder()->Reshape(input, representation_shape.dim_sizes());
-        } else {
-          // The core from which a return value is returned depends on the
-          // device assignment of the input to the retval. Since we can't change
-          // the device assignment of "input" at this point, we must always
-          // introduce an operator here, even if the shape does not change.
-          // TODO(b/76097077): propagate device assignments onto arguments and
-          // return values of functions, and then reshape unconditionally.
-          output = ctx->builder()->GetTupleElement(
-              ctx->builder()->Tuple({output}), 0);
-        }
-        tc.AddRetval(index_, dtype_, shape, output);
-      }
+      XlaContext& xla_context = XlaContext::Get(ctx);
+      xla_context.SetRetval(index_, ctx->InputExpression(0));
     }
   }
 
@@ -94,7 +60,8 @@ class RetvalOp : public XlaOpKernel {
   TF_DISALLOW_COPY_AND_ASSIGN(RetvalOp);
 };
 
-REGISTER_XLA_OP(Name("_Retval"), RetvalOp);
+REGISTER_XLA_OP(Name("_Retval").AllowResourceTypes().CompilationOnly(),
+                RetvalOp);
 
 }  // anonymous namespace
 }  // namespace tensorflow

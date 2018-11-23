@@ -26,8 +26,8 @@ from tensorflow.python.keras import backend
 from tensorflow.python.keras import constraints
 from tensorflow.python.keras import initializers
 from tensorflow.python.keras import regularizers
-from tensorflow.python.keras.engine import InputSpec
-from tensorflow.python.keras.engine import Layer
+from tensorflow.python.keras.engine.base_layer import Layer
+from tensorflow.python.keras.engine.input_spec import InputSpec
 # imports for backwards namespace compatibility
 # pylint: disable=unused-import
 from tensorflow.python.keras.layers.pooling import AveragePooling1D
@@ -64,7 +64,7 @@ class Conv(Layer):
       specifying the stride length of the convolution.
       Specifying any stride value != 1 is incompatible with specifying
       any `dilation_rate` value != 1.
-    padding: One of `"valid"` or `"same"` (case-insensitive).
+    padding: One of `"valid"`,  `"same"`, or `"causal"` (case-insensitive).
     data_format: A string, one of `channels_last` (default) or `channels_first`.
       The ordering of the dimensions in the inputs.
       `channels_last` corresponds to inputs with shape
@@ -126,6 +126,10 @@ class Conv(Layer):
         kernel_size, rank, 'kernel_size')
     self.strides = conv_utils.normalize_tuple(strides, rank, 'strides')
     self.padding = conv_utils.normalize_padding(padding)
+    if (self.padding == 'causal' and not isinstance(self,
+                                                    (Conv1D, SeparableConv1D))):
+      raise ValueError('Causal padding is only supported for `Conv1D`'
+                       'and ``SeparableConv1D`.')
     self.data_format = conv_utils.normalize_data_format(data_format)
     self.dilation_rate = conv_utils.normalize_tuple(
         dilation_rate, rank, 'dilation_rate')
@@ -145,37 +149,43 @@ class Conv(Layer):
       channel_axis = 1
     else:
       channel_axis = -1
-    if input_shape[channel_axis].value is None:
+    if input_shape.dims[channel_axis].value is None:
       raise ValueError('The channel dimension of the inputs '
                        'should be defined. Found `None`.')
     input_dim = int(input_shape[channel_axis])
     kernel_shape = self.kernel_size + (input_dim, self.filters)
 
-    self.kernel = self.add_variable(name='kernel',
-                                    shape=kernel_shape,
-                                    initializer=self.kernel_initializer,
-                                    regularizer=self.kernel_regularizer,
-                                    constraint=self.kernel_constraint,
-                                    trainable=True,
-                                    dtype=self.dtype)
+    self.kernel = self.add_weight(
+        name='kernel',
+        shape=kernel_shape,
+        initializer=self.kernel_initializer,
+        regularizer=self.kernel_regularizer,
+        constraint=self.kernel_constraint,
+        trainable=True,
+        dtype=self.dtype)
     if self.use_bias:
-      self.bias = self.add_variable(name='bias',
-                                    shape=(self.filters,),
-                                    initializer=self.bias_initializer,
-                                    regularizer=self.bias_regularizer,
-                                    constraint=self.bias_constraint,
-                                    trainable=True,
-                                    dtype=self.dtype)
+      self.bias = self.add_weight(
+          name='bias',
+          shape=(self.filters,),
+          initializer=self.bias_initializer,
+          regularizer=self.bias_regularizer,
+          constraint=self.bias_constraint,
+          trainable=True,
+          dtype=self.dtype)
     else:
       self.bias = None
     self.input_spec = InputSpec(ndim=self.rank + 2,
                                 axes={channel_axis: input_dim})
+    if self.padding == 'causal':
+      op_padding = 'valid'
+    else:
+      op_padding = self.padding
     self._convolution_op = nn_ops.Convolution(
         input_shape,
         filter_shape=self.kernel.get_shape(),
         dilation_rate=self.dilation_rate,
         strides=self.strides,
-        padding=self.padding.upper(),
+        padding=op_padding.upper(),
         data_format=conv_utils.convert_data_format(self.data_format,
                                                    self.rank + 2))
     self.built = True
@@ -261,6 +271,15 @@ class Conv(Layer):
     }
     base_config = super(Conv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
+
+  def _compute_causal_padding(self):
+    """Calculates padding for 'causal' option for 1-d conv layers."""
+    left_pad = self.dilation_rate[0] * (self.kernel_size[0] - 1)
+    if self.data_format == 'channels_last':
+      causal_padding = [[0, 0], [left_pad, 0], [0, 0]]
+    else:
+      causal_padding = [[0, 0], [0, 0], [left_pad, 0]]
+    return causal_padding
 
 
 @tf_export('keras.layers.Conv1D', 'keras.layers.Convolution1D')
@@ -359,6 +378,11 @@ class Conv1D(Conv):
         bias_constraint=constraints.get(bias_constraint),
         **kwargs)
 
+  def call(self, inputs):
+    if self.padding == 'causal':
+      inputs = array_ops.pad(inputs, self._compute_causal_padding())
+    return super(Conv1D, self).call(inputs)
+
 
 @tf_export('keras.layers.Conv2D', 'keras.layers.Convolution2D')
 class Conv2D(Conv):
@@ -380,11 +404,11 @@ class Conv2D(Conv):
       filters: Integer, the dimensionality of the output space
           (i.e. the number of output filters in the convolution).
       kernel_size: An integer or tuple/list of 2 integers, specifying the
-          width and height of the 2D convolution window.
+          height and width of the 2D convolution window.
           Can be a single integer to specify the same value for
           all spatial dimensions.
       strides: An integer or tuple/list of 2 integers,
-          specifying the strides of the convolution along the width and height.
+          specifying the strides of the convolution along the height and width.
           Can be a single integer to specify the same value for
           all spatial dimensions.
           Specifying any stride value != 1 is incompatible with specifying
@@ -611,16 +635,24 @@ class Conv2DTranspose(Conv2D):
       filters: Integer, the dimensionality of the output space
           (i.e. the number of output filters in the convolution).
       kernel_size: An integer or tuple/list of 2 integers, specifying the
-          width and height of the 2D convolution window.
+          height and width of the 2D convolution window.
           Can be a single integer to specify the same value for
           all spatial dimensions.
       strides: An integer or tuple/list of 2 integers,
-          specifying the strides of the convolution along the width and height.
+          specifying the strides of the convolution along the height and width.
           Can be a single integer to specify the same value for
           all spatial dimensions.
           Specifying any stride value != 1 is incompatible with specifying
           any `dilation_rate` value != 1.
       padding: one of `"valid"` or `"same"` (case-insensitive).
+      output_padding: An integer or tuple/list of 2 integers,
+          specifying the amount of padding along the height and width
+          of the output tensor.
+          Can be a single integer to specify the same value for all
+          spatial dimensions.
+          The amount of output padding along a given dimension must be
+          lower than the stride along that same dimension.
+          If set to `None` (default), the output shape is inferred.
       data_format: A string,
           one of `channels_last` (default) or `channels_first`.
           The ordering of the dimensions in the inputs.
@@ -676,7 +708,9 @@ class Conv2DTranspose(Conv2D):
                kernel_size,
                strides=(1, 1),
                padding='valid',
+               output_padding=None,
                data_format=None,
+               dilation_rate=(1, 1),
                activation=None,
                use_bias=True,
                kernel_initializer='glorot_uniform',
@@ -693,6 +727,7 @@ class Conv2DTranspose(Conv2D):
         strides=strides,
         padding=padding,
         data_format=data_format,
+        dilation_rate=dilation_rate,
         activation=activations.get(activation),
         use_bias=use_bias,
         kernel_initializer=initializers.get(kernel_initializer),
@@ -704,6 +739,16 @@ class Conv2DTranspose(Conv2D):
         bias_constraint=constraints.get(bias_constraint),
         **kwargs)
 
+    self.output_padding = output_padding
+    if self.output_padding is not None:
+      self.output_padding = conv_utils.normalize_tuple(
+          self.output_padding, 2, 'output_padding')
+      for stride, out_pad in zip(self.strides, self.output_padding):
+        if out_pad >= stride:
+          raise ValueError('Stride ' + str(self.strides) + ' must be '
+                           'greater than output padding ' +
+                           str(self.output_padding))
+
   def build(self, input_shape):
     input_shape = tensor_shape.TensorShape(input_shape)
     if len(input_shape) != 4:
@@ -713,28 +758,30 @@ class Conv2DTranspose(Conv2D):
       channel_axis = 1
     else:
       channel_axis = -1
-    if input_shape[channel_axis].value is None:
+    if input_shape.dims[channel_axis].value is None:
       raise ValueError('The channel dimension of the inputs '
                        'should be defined. Found `None`.')
     input_dim = int(input_shape[channel_axis])
     self.input_spec = InputSpec(ndim=4, axes={channel_axis: input_dim})
     kernel_shape = self.kernel_size + (self.filters, input_dim)
 
-    self.kernel = self.add_variable(name='kernel',
-                                    shape=kernel_shape,
-                                    initializer=self.kernel_initializer,
-                                    regularizer=self.kernel_regularizer,
-                                    constraint=self.kernel_constraint,
-                                    trainable=True,
-                                    dtype=self.dtype)
+    self.kernel = self.add_weight(
+        name='kernel',
+        shape=kernel_shape,
+        initializer=self.kernel_initializer,
+        regularizer=self.kernel_regularizer,
+        constraint=self.kernel_constraint,
+        trainable=True,
+        dtype=self.dtype)
     if self.use_bias:
-      self.bias = self.add_variable(name='bias',
-                                    shape=(self.filters,),
-                                    initializer=self.bias_initializer,
-                                    regularizer=self.bias_regularizer,
-                                    constraint=self.bias_constraint,
-                                    trainable=True,
-                                    dtype=self.dtype)
+      self.bias = self.add_weight(
+          name='bias',
+          shape=(self.filters,),
+          initializer=self.bias_initializer,
+          regularizer=self.bias_regularizer,
+          constraint=self.bias_constraint,
+          trainable=True,
+          dtype=self.dtype)
     else:
       self.bias = None
     self.built = True
@@ -743,51 +790,50 @@ class Conv2DTranspose(Conv2D):
     inputs_shape = array_ops.shape(inputs)
     batch_size = inputs_shape[0]
     if self.data_format == 'channels_first':
-      c_axis, h_axis, w_axis = 1, 2, 3
+      h_axis, w_axis = 2, 3
     else:
-      c_axis, h_axis, w_axis = 3, 1, 2
+      h_axis, w_axis = 1, 2
 
     height, width = inputs_shape[h_axis], inputs_shape[w_axis]
     kernel_h, kernel_w = self.kernel_size
     stride_h, stride_w = self.strides
 
+    if self.output_padding is None:
+      out_pad_h = out_pad_w = None
+    else:
+      out_pad_h, out_pad_w = self.output_padding
+
     # Infer the dynamic output shape:
     out_height = conv_utils.deconv_output_length(height,
                                                  kernel_h,
-                                                 self.padding,
-                                                 stride_h)
+                                                 padding=self.padding,
+                                                 output_padding=out_pad_h,
+                                                 stride=stride_h,
+                                                 dilation=self.dilation_rate[0])
     out_width = conv_utils.deconv_output_length(width,
                                                 kernel_w,
-                                                self.padding,
-                                                stride_w)
+                                                padding=self.padding,
+                                                output_padding=out_pad_w,
+                                                stride=stride_w,
+                                                dilation=self.dilation_rate[1])
     if self.data_format == 'channels_first':
       output_shape = (batch_size, self.filters, out_height, out_width)
-      strides = (1, 1, stride_h, stride_w)
     else:
       output_shape = (batch_size, out_height, out_width, self.filters)
-      strides = (1, stride_h, stride_w, 1)
 
     output_shape_tensor = array_ops.stack(output_shape)
-    outputs = nn.conv2d_transpose(
+    outputs = backend.conv2d_transpose(
         inputs,
         self.kernel,
         output_shape_tensor,
-        strides,
-        padding=self.padding.upper(),
-        data_format=conv_utils.convert_data_format(self.data_format, ndim=4))
+        strides=self.strides,
+        padding=self.padding,
+        data_format=self.data_format,
+        dilation_rate=self.dilation_rate)
 
     if not context.executing_eagerly():
       # Infer the static output shape:
-      out_shape = inputs.get_shape().as_list()
-      out_shape[c_axis] = self.filters
-      out_shape[h_axis] = conv_utils.deconv_output_length(out_shape[h_axis],
-                                                          kernel_h,
-                                                          self.padding,
-                                                          stride_h)
-      out_shape[w_axis] = conv_utils.deconv_output_length(out_shape[w_axis],
-                                                          kernel_w,
-                                                          self.padding,
-                                                          stride_w)
+      out_shape = self.compute_output_shape(inputs.shape)
       outputs.set_shape(out_shape)
 
     if self.use_bias:
@@ -811,12 +857,32 @@ class Conv2DTranspose(Conv2D):
     kernel_h, kernel_w = self.kernel_size
     stride_h, stride_w = self.strides
 
+    if self.output_padding is None:
+      out_pad_h = out_pad_w = None
+    else:
+      out_pad_h, out_pad_w = self.output_padding
+
     output_shape[c_axis] = self.filters
     output_shape[h_axis] = conv_utils.deconv_output_length(
-        output_shape[h_axis], kernel_h, self.padding, stride_h)
+        output_shape[h_axis],
+        kernel_h,
+        padding=self.padding,
+        output_padding=out_pad_h,
+        stride=stride_h,
+        dilation=self.dilation_rate[0])
     output_shape[w_axis] = conv_utils.deconv_output_length(
-        output_shape[w_axis], kernel_w, self.padding, stride_w)
+        output_shape[w_axis],
+        kernel_w,
+        padding=self.padding,
+        output_padding=out_pad_w,
+        stride=stride_w,
+        dilation=self.dilation_rate[1])
     return tensor_shape.TensorShape(output_shape)
+
+  def get_config(self):
+    config = super(Conv2DTranspose, self).get_config()
+    config['output_padding'] = self.output_padding
+    return config
 
 
 @tf_export('keras.layers.Conv3DTranspose',
@@ -852,6 +918,14 @@ class Conv3DTranspose(Conv3D):
           Specifying any stride value != 1 is incompatible with specifying
           any `dilation_rate` value != 1.
       padding: one of `"valid"` or `"same"` (case-insensitive).
+      output_padding: An integer or tuple/list of 3 integers,
+          specifying the amount of padding along the depth, height, and
+          width.
+          Can be a single integer to specify the same value for all
+          spatial dimensions.
+          The amount of output padding along a given dimension must be
+          lower than the stride along that same dimension.
+          If set to `None` (default), the output shape is inferred.
       data_format: A string,
           one of `channels_last` (default) or `channels_first`.
           The ordering of the dimensions in the inputs.
@@ -917,6 +991,7 @@ class Conv3DTranspose(Conv3D):
                kernel_size,
                strides=(1, 1, 1),
                padding='valid',
+               output_padding=None,
                data_format=None,
                activation=None,
                use_bias=True,
@@ -945,6 +1020,16 @@ class Conv3DTranspose(Conv3D):
         bias_constraint=constraints.get(bias_constraint),
         **kwargs)
 
+    self.output_padding = output_padding
+    if self.output_padding is not None:
+      self.output_padding = conv_utils.normalize_tuple(
+          self.output_padding, 3, 'output_padding')
+      for stride, out_pad in zip(self.strides, self.output_padding):
+        if out_pad >= stride:
+          raise ValueError('Stride ' + str(self.strides) + ' must be '
+                           'greater than output padding ' +
+                           str(self.output_padding))
+
   def build(self, input_shape):
     input_shape = tensor_shape.TensorShape(input_shape)
     if len(input_shape) != 5:
@@ -954,14 +1039,14 @@ class Conv3DTranspose(Conv3D):
       channel_axis = 1
     else:
       channel_axis = -1
-    if input_shape[channel_axis].value is None:
+    if input_shape.dims[channel_axis].value is None:
       raise ValueError('The channel dimension of the inputs '
                        'should be defined, found None: ' + str(input_shape))
     input_dim = int(input_shape[channel_axis])
     kernel_shape = self.kernel_size + (self.filters, input_dim)
     self.input_spec = InputSpec(ndim=5, axes={channel_axis: input_dim})
 
-    self.kernel = self.add_variable(
+    self.kernel = self.add_weight(
         'kernel',
         shape=kernel_shape,
         initializer=self.kernel_initializer,
@@ -970,7 +1055,7 @@ class Conv3DTranspose(Conv3D):
         trainable=True,
         dtype=self.dtype)
     if self.use_bias:
-      self.bias = self.add_variable(
+      self.bias = self.add_weight(
           'bias',
           shape=(self.filters,),
           initializer=self.bias_initializer,
@@ -986,11 +1071,9 @@ class Conv3DTranspose(Conv3D):
     inputs_shape = array_ops.shape(inputs)
     batch_size = inputs_shape[0]
     if self.data_format == 'channels_first':
-      c_axis, d_axis, h_axis, w_axis = 1, 2, 3, 4
+      d_axis, h_axis, w_axis = 2, 3, 4
     else:
-      c_axis, d_axis, h_axis, w_axis = 4, 1, 2, 3
-
-    self.input_spec = InputSpec(ndim=5, axes={c_axis: inputs_shape[c_axis]})
+      d_axis, h_axis, w_axis = 1, 2, 3
 
     depth = inputs_shape[d_axis]
     height = inputs_shape[h_axis]
@@ -999,19 +1082,27 @@ class Conv3DTranspose(Conv3D):
     kernel_d, kernel_h, kernel_w = self.kernel_size
     stride_d, stride_h, stride_w = self.strides
 
+    if self.output_padding is None:
+      out_pad_d = out_pad_h = out_pad_w = None
+    else:
+      out_pad_d, out_pad_h, out_pad_w = self.output_padding
+
     # Infer the dynamic output shape:
     out_depth = conv_utils.deconv_output_length(depth,
                                                 kernel_d,
-                                                self.padding,
-                                                stride_d)
+                                                padding=self.padding,
+                                                output_padding=out_pad_d,
+                                                stride=stride_d)
     out_height = conv_utils.deconv_output_length(height,
                                                  kernel_h,
-                                                 self.padding,
-                                                 stride_h)
+                                                 padding=self.padding,
+                                                 output_padding=out_pad_h,
+                                                 stride=stride_h)
     out_width = conv_utils.deconv_output_length(width,
                                                 kernel_w,
-                                                self.padding,
-                                                stride_w)
+                                                padding=self.padding,
+                                                output_padding=out_pad_w,
+                                                stride=stride_w)
     if self.data_format == 'channels_first':
       output_shape = (batch_size, self.filters, out_depth, out_height,
                       out_width)
@@ -1032,20 +1123,7 @@ class Conv3DTranspose(Conv3D):
 
     if not context.executing_eagerly():
       # Infer the static output shape:
-      out_shape = inputs.get_shape().as_list()
-      out_shape[c_axis] = self.filters
-      out_shape[d_axis] = conv_utils.deconv_output_length(out_shape[d_axis],
-                                                          kernel_d,
-                                                          self.padding,
-                                                          stride_d)
-      out_shape[h_axis] = conv_utils.deconv_output_length(out_shape[h_axis],
-                                                          kernel_h,
-                                                          self.padding,
-                                                          stride_h)
-      out_shape[w_axis] = conv_utils.deconv_output_length(out_shape[w_axis],
-                                                          kernel_w,
-                                                          self.padding,
-                                                          stride_w)
+      out_shape = self.compute_output_shape(inputs.shape)
       outputs.set_shape(out_shape)
 
     if self.use_bias:
@@ -1083,14 +1161,37 @@ class Conv3DTranspose(Conv3D):
     kernel_d, kernel_h, kernel_w = self.kernel_size
     stride_d, stride_h, stride_w = self.strides
 
+    if self.output_padding is None:
+      out_pad_d = out_pad_h = out_pad_w = None
+    else:
+      out_pad_d, out_pad_h, out_pad_w = self.output_padding
+
     output_shape[c_axis] = self.filters
     output_shape[d_axis] = conv_utils.deconv_output_length(
-        output_shape[d_axis], kernel_d, self.padding, stride_d)
+        output_shape[d_axis],
+        kernel_d,
+        padding=self.padding,
+        output_padding=out_pad_d,
+        stride=stride_d)
     output_shape[h_axis] = conv_utils.deconv_output_length(
-        output_shape[h_axis], kernel_h, self.padding, stride_h)
+        output_shape[h_axis],
+        kernel_h,
+        padding=self.padding,
+        output_padding=out_pad_h,
+        stride=stride_h)
     output_shape[w_axis] = conv_utils.deconv_output_length(
-        output_shape[w_axis], kernel_w, self.padding, stride_w)
+        output_shape[w_axis],
+        kernel_w,
+        padding=self.padding,
+        output_padding=out_pad_w,
+        stride=stride_w)
     return tensor_shape.TensorShape(output_shape)
+
+  def get_config(self):
+    config = super(Conv3DTranspose, self).get_config()
+    config.pop('dilation_rate')
+    config['output_padding'] = self.output_padding
+    return config
 
 
 class SeparableConv(Conv):
@@ -1191,6 +1292,7 @@ class SeparableConv(Conv):
         dilation_rate=dilation_rate,
         activation=activations.get(activation),
         use_bias=use_bias,
+        bias_initializer=initializers.get(bias_initializer),
         bias_regularizer=regularizers.get(bias_regularizer),
         activity_regularizer=regularizers.get(activity_regularizer),
         bias_constraint=bias_constraint,
@@ -1211,7 +1313,7 @@ class SeparableConv(Conv):
       channel_axis = 1
     else:
       channel_axis = -1
-    if input_shape[channel_axis].value is None:
+    if input_shape.dims[channel_axis].value is None:
       raise ValueError('The channel dimension of the inputs '
                        'should be defined. Found `None`.')
     input_dim = int(input_shape[channel_axis])
@@ -1222,7 +1324,7 @@ class SeparableConv(Conv):
     pointwise_kernel_shape = (
         1,) * self.rank + (self.depth_multiplier * input_dim, self.filters)
 
-    self.depthwise_kernel = self.add_variable(
+    self.depthwise_kernel = self.add_weight(
         name='depthwise_kernel',
         shape=depthwise_kernel_shape,
         initializer=self.depthwise_initializer,
@@ -1230,7 +1332,7 @@ class SeparableConv(Conv):
         constraint=self.depthwise_constraint,
         trainable=True,
         dtype=self.dtype)
-    self.pointwise_kernel = self.add_variable(
+    self.pointwise_kernel = self.add_weight(
         name='pointwise_kernel',
         shape=pointwise_kernel_shape,
         initializer=self.pointwise_initializer,
@@ -1239,13 +1341,14 @@ class SeparableConv(Conv):
         trainable=True,
         dtype=self.dtype)
     if self.use_bias:
-      self.bias = self.add_variable(name='bias',
-                                    shape=(self.filters,),
-                                    initializer=self.bias_initializer,
-                                    regularizer=self.bias_regularizer,
-                                    constraint=self.bias_constraint,
-                                    trainable=True,
-                                    dtype=self.dtype)
+      self.bias = self.add_weight(
+          name='bias',
+          shape=(self.filters,),
+          initializer=self.bias_initializer,
+          regularizer=self.bias_regularizer,
+          constraint=self.bias_constraint,
+          trainable=True,
+          dtype=self.dtype)
     else:
       self.bias = None
     self.built = True
@@ -1255,31 +1358,44 @@ class SeparableConv(Conv):
 
   def get_config(self):
     config = {
-        'filters': self.filters,
-        'kernel_size': self.kernel_size,
-        'strides': self.strides,
-        'padding': self.padding,
-        'data_format': self.data_format,
-        'dilation_rate': self.dilation_rate,
-        'activation': activations.serialize(self.activation),
-        'use_bias': self.use_bias,
+        'filters':
+            self.filters,
+        'kernel_size':
+            self.kernel_size,
+        'strides':
+            self.strides,
+        'padding':
+            self.padding,
+        'data_format':
+            self.data_format,
+        'depth_multiplier':
+            self.depth_multiplier,
+        'dilation_rate':
+            self.dilation_rate,
+        'activation':
+            activations.serialize(self.activation),
+        'use_bias':
+            self.use_bias,
         'depthwise_initializer':
             initializers.serialize(self.depthwise_initializer),
         'pointwise_initializer':
             initializers.serialize(self.pointwise_initializer),
-        'bias_initializer': initializers.serialize(self.bias_initializer),
+        'bias_initializer':
+            initializers.serialize(self.bias_initializer),
         'depthwise_regularizer':
             regularizers.serialize(self.depthwise_regularizer),
         'pointwise_regularizer':
             regularizers.serialize(self.pointwise_regularizer),
-        'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+        'bias_regularizer':
+            regularizers.serialize(self.bias_regularizer),
         'activity_regularizer':
             regularizers.serialize(self.activity_regularizer),
         'depthwise_constraint':
             constraints.serialize(self.depthwise_constraint),
         'pointwise_constraint':
             constraints.serialize(self.pointwise_constraint),
-        'bias_constraint': constraints.serialize(self.bias_constraint)
+        'bias_constraint':
+            constraints.serialize(self.bias_constraint)
     }
     base_config = super(SeparableConv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
@@ -1305,7 +1421,7 @@ class SeparableConv1D(SeparableConv):
       of the convolution.
       Specifying any `stride` value != 1 is incompatible with specifying
       any `dilation_rate` value != 1.
-    padding: One of `"valid"` or `"same"` (case-insensitive).
+    padding: One of `"valid"`, `"same"`, or `"causal"` (case-insensitive).
     data_format: A string, one of `channels_last` (default) or `channels_first`.
       The ordering of the dimensions in the inputs.
       `channels_last` corresponds to inputs with shape
@@ -1391,6 +1507,8 @@ class SeparableConv1D(SeparableConv):
         **kwargs)
 
   def call(self, inputs):
+    if self.padding == 'causal':
+      inputs = array_ops.pad(inputs, self._compute_causal_padding())
     if self.data_format == 'channels_last':
       strides = (1,) + self.strides * 2 + (1,)
       spatial_start_dim = 1
@@ -1405,12 +1523,16 @@ class SeparableConv1D(SeparableConv):
     pointwise_kernel = array_ops.expand_dims(self.pointwise_kernel, 0)
     dilation_rate = (1,) + self.dilation_rate
 
+    if self.padding == 'causal':
+      op_padding = 'valid'
+    else:
+      op_padding = self.padding
     outputs = nn.separable_conv2d(
         inputs,
         depthwise_kernel,
         pointwise_kernel,
         strides=strides,
-        padding=self.padding.upper(),
+        padding=op_padding.upper(),
         rate=dilation_rate,
         data_format=conv_utils.convert_data_format(self.data_format, ndim=4))
 
@@ -1447,11 +1569,11 @@ class SeparableConv2D(SeparableConv):
       filters: Integer, the dimensionality of the output space
           (i.e. the number of output filters in the convolution).
       kernel_size: An integer or tuple/list of 2 integers, specifying the
-          width and height of the 2D convolution window.
+          height and width of the 2D convolution window.
           Can be a single integer to specify the same value for
           all spatial dimensions.
       strides: An integer or tuple/list of 2 integers,
-          specifying the strides of the convolution along the width and height.
+          specifying the strides of the convolution along the height and width.
           Can be a single integer to specify the same value for
           all spatial dimensions.
           Specifying any stride value != 1 is incompatible with specifying
@@ -1591,11 +1713,11 @@ class DepthwiseConv2D(Conv2D):
 
   Arguments:
     kernel_size: An integer or tuple/list of 2 integers, specifying the
-        width and height of the 2D convolution window.
+        height and width of the 2D convolution window.
         Can be a single integer to specify the same value for
         all spatial dimensions.
     strides: An integer or tuple/list of 2 integers,
-        specifying the strides of the convolution along the width and height.
+        specifying the strides of the convolution along the height and width.
         Can be a single integer to specify the same value for
         all spatial dimensions.
         Specifying any stride value != 1 is incompatible with specifying
@@ -1686,7 +1808,7 @@ class DepthwiseConv2D(Conv2D):
       channel_axis = 1
     else:
       channel_axis = 3
-    if input_shape[channel_axis] is None:
+    if input_shape.dims[channel_axis].value is None:
       raise ValueError('The channel dimension of the inputs to '
                        '`DepthwiseConv2D` '
                        'should be defined. Found `None`.')
@@ -1724,7 +1846,7 @@ class DepthwiseConv2D(Conv2D):
         dilation_rate=self.dilation_rate,
         data_format=self.data_format)
 
-    if self.bias:
+    if self.use_bias:
       outputs = backend.bias_add(
           outputs,
           self.bias,
@@ -1829,6 +1951,7 @@ class UpSampling2D(Layer):
           It defaults to the `image_data_format` value found in your
           Keras config file at `~/.keras/keras.json`.
           If you never set it, then it will be "channels_last".
+      interpolation: A string, one of `nearest` or `bilinear`.
 
   Input shape:
       4D tensor with shape:
@@ -1845,10 +1968,18 @@ class UpSampling2D(Layer):
           `(batch, channels, upsampled_rows, upsampled_cols)`
   """
 
-  def __init__(self, size=(2, 2), data_format=None, **kwargs):
+  def __init__(self,
+               size=(2, 2),
+               data_format=None,
+               interpolation='nearest',
+               **kwargs):
     super(UpSampling2D, self).__init__(**kwargs)
     self.data_format = conv_utils.normalize_data_format(data_format)
     self.size = conv_utils.normalize_tuple(size, 2, 'size')
+    if interpolation not in {'nearest', 'bilinear'}:
+      raise ValueError('`interpolation` argument should be one of `"nearest"` '
+                       'or `"bilinear"`.')
+    self.interpolation = interpolation
     self.input_spec = InputSpec(ndim=4)
 
   def compute_output_shape(self, input_shape):
@@ -1870,7 +2001,8 @@ class UpSampling2D(Layer):
 
   def call(self, inputs):
     return backend.resize_images(
-        inputs, self.size[0], self.size[1], self.data_format)
+        inputs, self.size[0], self.size[1], self.data_format,
+        interpolation=self.interpolation)
 
   def get_config(self):
     config = {'size': self.size, 'data_format': self.data_format}
@@ -2002,7 +2134,7 @@ class ZeroPadding2D(Layer):
   Arguments:
       padding: int, or tuple of 2 ints, or tuple of 2 tuples of 2 ints.
           - If int: the same symmetric padding
-              is applied to width and height.
+              is applied to height and width.
           - If tuple of 2 ints:
               interpreted as two different
               symmetric padding values for height and width:
@@ -2101,7 +2233,7 @@ class ZeroPadding3D(Layer):
   Arguments:
       padding: int, or tuple of 3 ints, or tuple of 3 tuples of 2 ints.
           - If int: the same symmetric padding
-              is applied to width and height.
+              is applied to height and width.
           - If tuple of 3 ints:
               interpreted as two different
               symmetric padding values for height and width:
@@ -2261,12 +2393,12 @@ class Cropping1D(Layer):
 class Cropping2D(Layer):
   """Cropping layer for 2D input (e.g. picture).
 
-  It crops along spatial dimensions, i.e. width and height.
+  It crops along spatial dimensions, i.e. height and width.
 
   Arguments:
       cropping: int, or tuple of 2 ints, or tuple of 2 tuples of 2 ints.
           - If int: the same symmetric cropping
-              is applied to width and height.
+              is applied to height and width.
           - If tuple of 2 ints:
               interpreted as two different
               symmetric cropping values for height and width:

@@ -27,6 +27,7 @@ import time
 import six
 
 from tensorflow.core.protobuf import config_pb2
+from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.core.util import test_log_pb2
 from tensorflow.python.client import timeline
 from tensorflow.python.platform import app
@@ -66,11 +67,11 @@ def _global_report_benchmark(
     if not isinstance(extras, dict):
       raise TypeError("extras must be a dict")
 
-    logging.info("Benchmark [%s] iters: %d, wall_time: %g, cpu_time: %g,"
-                 "throughput: %g %s", name, iters if iters is not None else -1,
-                 wall_time if wall_time is not None else -1, cpu_time if
-                 cpu_time is not None else -1, throughput if
-                 throughput is not None else -1, str(extras) if extras else "")
+  logging.info("Benchmark [%s] iters: %d, wall_time: %g, cpu_time: %g,"
+               "throughput: %g %s", name, iters if iters is not None else -1,
+               wall_time if wall_time is not None else -1, cpu_time if
+               cpu_time is not None else -1, throughput if
+               throughput is not None else -1, str(extras) if extras else "")
 
   entries = test_log_pb2.BenchmarkEntries()
   entry = entries.entry.add()
@@ -180,6 +181,19 @@ class Benchmark(six.with_metaclass(_BenchmarkRegistrar, object)):
     _global_report_benchmark(
         name=name, iters=iters, cpu_time=cpu_time, wall_time=wall_time,
         throughput=throughput, extras=extras)
+
+
+@tf_export("test.benchmark_config")
+def benchmark_config():
+  """Returns a tf.ConfigProto for disabling the dependency optimizer.
+
+    Returns:
+      A TensorFlow ConfigProto object.
+  """
+  config = config_pb2.ConfigProto()
+  config.graph_options.rewrite_options.dependency_optimization = (
+      rewriter_config_pb2.RewriterConfig.OFF)
+  return config
 
 
 @tf_export("test.Benchmark")

@@ -104,7 +104,7 @@ class FakeWorker : public TestWorkerInterface {
             // bytes in the response.
             RecvBufRespExtra extra;
             int64 num_bytes = h->prod_value->TotalBytes();
-            extra.set_tensor_content(string(
+            extra.add_tensor_content(string(
                 reinterpret_cast<const char*>(DMAHelper::base(h->prod_value)),
                 num_bytes));
             response->mutable_transport_options()->PackFrom(extra);
@@ -280,7 +280,7 @@ TEST_F(CollRMADistTest, ProdFirstOK) {
       "/job:worker/replica:0/task:1",                     // peer_task
       false,                                              // peer_is_local
       kBufKey, dst_device, to_device_ctx, alloc_attr_, &to_tensor_,
-      device_locality_,
+      device_locality_, 0 /*dev_to_dev_stream_index*/,
       [this, &consumer_status, &consumer_note](const Status& s) {
         consumer_status = s;
         consumer_note.Notify();
@@ -309,7 +309,7 @@ TEST_F(CollRMADistTest, ConsFirstOK) {
       "/job:worker/replica:0/task:1",                     // peer_task
       false,                                              // peer_is_local
       kBufKey, dst_device, to_device_ctx, alloc_attr_, &to_tensor_,
-      device_locality_,
+      device_locality_, 0 /*dev_to_dev_stream_index*/,
       [this, &consumer_status, &consumer_note](const Status& s) {
         consumer_status = s;
         consumer_note.Notify();
@@ -342,7 +342,7 @@ TEST_F(CollRMADistTest, ConsFirstAbort) {
       "/job:worker/replica:0/task:1",                     // peer_task
       false,                                              // peer_is_local
       kBufKey, dst_device, to_device_ctx, alloc_attr_, &to_tensor_,
-      device_locality_,
+      device_locality_, 0 /*dev_to_dev_stream_index*/,
       [this, &consumer_status, &consumer_note](const Status& s) {
         consumer_status = s;
         consumer_note.Notify();

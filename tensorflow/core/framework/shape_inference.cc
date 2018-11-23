@@ -239,6 +239,15 @@ void InferenceContext::PreInputInit(
   output_handle_shapes_and_types_.resize(num_outputs);
 }
 
+Status InferenceContext::ExpandOutputs(int new_output_size) {
+  if (new_output_size < outputs_.size()) {
+    return errors::InvalidArgument("Trying to reduce number of outputs of op.");
+  }
+  outputs_.resize(new_output_size, nullptr);
+  output_handle_shapes_and_types_.resize(new_output_size);
+  return Status::OK();
+}
+
 void InferenceContext::PostInputInit(
     std::vector<std::unique_ptr<std::vector<ShapeAndType>>> input_handle_data) {
   int num_inputs_from_node_def = 0;
@@ -338,6 +347,20 @@ string InferenceContext::DebugString(DimensionHandle d) {
 string InferenceContext::DebugString() const {
   return strings::StrCat("InferenceContext for node: ",
                          ProtoDebugString(*node_def_));
+}
+
+string InferenceContext::DebugString(const ShapeAndType& shape_and_type) {
+  return strings::StrCat(DebugString(shape_and_type.shape), ":",
+                         DataTypeString(shape_and_type.dtype));
+}
+
+string InferenceContext::DebugString(
+    gtl::ArraySlice<ShapeAndType> shape_and_types) {
+  std::vector<string> pieces;
+  for (const ShapeAndType& s : shape_and_types) {
+    pieces.push_back(DebugString(s));
+  }
+  return strings::StrCat("[", str_util::Join(pieces, ","), "]");
 }
 
 Status InferenceContext::WithRank(ShapeHandle shape, int64 rank,
@@ -936,8 +959,7 @@ Status InferenceContext::GetScalarFromTensor(const Tensor* t, int64* val) {
     *val = t->scalar<int64>()();
     return Status::OK();
   } else {
-    return errors::InvalidArgument(
-        "Scalar input for dim size must be int32 or int64");
+    return errors::InvalidArgument("Scalar input must be int32 or int64.");
   }
 }
 

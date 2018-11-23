@@ -62,11 +62,10 @@ Status GRPCStub::ResetDevice(const ResetDeviceRequest* request,
   });
 }
 
-Status GRPCStub::LoadComputationSnapshot(
-    const LoadComputationSnapshotRequest* request,
-    LoadComputationSnapshotResponse* response) {
+Status GRPCStub::Compile(const CompileRequest* request,
+                         CompileResponse* response) {
   return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->LoadComputationSnapshot(context, *request, response);
+    return grpc_stub_->Compile(context, *request, response);
   });
 }
 
@@ -77,32 +76,11 @@ Status GRPCStub::Execute(const ExecuteRequest* request,
   });
 }
 
-Status GRPCStub::ExecuteGraph(const ExecuteGraphRequest* request,
-                              ExecuteResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->ExecuteGraph(context, *request, response);
-  });
-}
-
-Status GRPCStub::ExecuteParallel(const ExecuteParallelRequest* request,
-                                 ExecuteParallelResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->ExecuteParallel(context, *request, response);
-  });
-}
-
 Status GRPCStub::ExecuteGraphParallel(
     const ExecuteGraphParallelRequest* request,
     ExecuteParallelResponse* response) {
   return MakeRPC([this, request, response](::grpc::ClientContext* context) {
     return grpc_stub_->ExecuteGraphParallel(context, *request, response);
-  });
-}
-
-Status GRPCStub::ExecuteAsync(const ExecuteAsyncRequest* request,
-                              ExecuteAsyncResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->ExecuteAsync(context, *request, response);
   });
 }
 
@@ -120,25 +98,11 @@ Status GRPCStub::DeconstructTuple(const DeconstructTupleRequest* request,
   });
 }
 
-Status GRPCStub::GetComputationStats(const ComputationStatsRequest* request,
-                                     ComputationStatsResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->GetComputationStats(context, *request, response);
-  });
-}
-
 Status GRPCStub::GetComputationGraphStats(
     const ComputationGraphStatsRequest* request,
     ComputationStatsResponse* response) {
   return MakeRPC([this, request, response](::grpc::ClientContext* context) {
     return grpc_stub_->GetComputationGraphStats(context, *request, response);
-  });
-}
-
-Status GRPCStub::GetComputationShape(const GetComputationShapeRequest* request,
-                                     GetComputationShapeResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->GetComputationShape(context, *request, response);
   });
 }
 
@@ -163,61 +127,11 @@ Status GRPCStub::CreateChannelHandle(const CreateChannelHandleRequest* request,
   });
 }
 
-// Methods used by ComputationBuilder.
-Status GRPCStub::Computation(const ComputationRequest* request,
-                             ComputationResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->Computation(context, *request, response);
-  });
-}
-
-Status GRPCStub::Op(const OpRequest* request, OpResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->CreateOp(context, *request, response);
-  });
-}
-
-Status GRPCStub::GetLocalShape(const GetLocalShapeRequest* request,
-                               GetLocalShapeResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->GetLocalShape(context, *request, response);
-  });
-}
-
-Status GRPCStub::SetReturnValue(const SetReturnValueRequest* request,
-                                SetReturnValueResponse* responses) {
-  return MakeRPC([this, request, responses](::grpc::ClientContext* context) {
-    return grpc_stub_->SetReturnValue(context, *request, responses);
-  });
-}
-
-Status GRPCStub::IsConstant(const IsConstantRequest* request,
-                            IsConstantResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->IsConstant(context, *request, response);
-  });
-}
-
-Status GRPCStub::ComputeConstant(const ComputeConstantRequest* request,
-                                 ComputeConstantResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->ComputeConstant(context, *request, response);
-  });
-}
-
 Status GRPCStub::ComputeConstantGraph(
     const ComputeConstantGraphRequest* request,
     ComputeConstantResponse* response) {
   return MakeRPC([this, request, response](::grpc::ClientContext* context) {
     return grpc_stub_->ComputeConstantGraph(context, *request, response);
-  });
-}
-
-// Methods used by Computation.
-Status GRPCStub::SnapshotComputation(const SnapshotComputationRequest* request,
-                                     SnapshotComputationResponse* response) {
-  return MakeRPC([this, request, response](::grpc::ClientContext* context) {
-    return grpc_stub_->SnapshotComputation(context, *request, response);
   });
 }
 

@@ -16,9 +16,10 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_HLO_MATCHERS_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_HLO_MATCHERS_H_
 
+#include "absl/types/optional.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/test.h"
-#include "tensorflow/core/lib/gtl/optional.h"
 
 namespace xla {
 namespace testing {
@@ -119,8 +120,7 @@ class HloShapeAndLayoutMatcher
 class HloShardingMatcher
     : public ::testing::MatcherInterface<const HloInstruction*> {
  public:
-  explicit HloShardingMatcher(
-      const tensorflow::gtl::optional<HloSharding>& sharding)
+  explicit HloShardingMatcher(const absl::optional<HloSharding>& sharding)
       : sharding_(sharding) {}
 
   bool MatchAndExplain(const HloInstruction* instruction,
@@ -128,7 +128,7 @@ class HloShardingMatcher
   void DescribeTo(std::ostream* os) const override;
 
  private:
-  tensorflow::gtl::optional<HloSharding> sharding_;
+  absl::optional<HloSharding> sharding_;
 };
 
 // Matches a Dot HLO instruction with specific LHS and RHS contracting
@@ -165,6 +165,7 @@ namespace opcode_matchers {
   }
 HLO_MATCHER(Abs);
 HLO_MATCHER(Add);
+HLO_MATCHER(AllToAll);
 HLO_MATCHER(Bitcast);
 HLO_MATCHER(Broadcast);
 HLO_MATCHER(BatchNormGrad);
@@ -178,7 +179,9 @@ HLO_MATCHER(Convert);
 HLO_MATCHER(Convolution);
 HLO_MATCHER(Copy);
 HLO_MATCHER(CrossReplicaSum);
+HLO_MATCHER(CollectivePermute);
 HLO_MATCHER(Divide);
+HLO_MATCHER(Domain);
 HLO_MATCHER(DynamicSlice);
 HLO_MATCHER(DynamicUpdateSlice);
 HLO_MATCHER(Eq);
@@ -186,7 +189,9 @@ HLO_MATCHER(Exp);
 HLO_MATCHER(Floor);
 HLO_MATCHER(Fusion);
 HLO_MATCHER(Ge);
+HLO_MATCHER(AfterAll);
 HLO_MATCHER(Gt);
+HLO_MATCHER(Iota);
 HLO_MATCHER(Infeed);
 HLO_MATCHER(IsFinite);
 HLO_MATCHER(Le);
@@ -194,6 +199,7 @@ HLO_MATCHER(Log);
 HLO_MATCHER(And);
 HLO_MATCHER(Not);
 HLO_MATCHER(Or);
+HLO_MATCHER(Xor);
 HLO_MATCHER(Lt);
 HLO_MATCHER(Map);
 HLO_MATCHER(Maximum);
@@ -213,6 +219,7 @@ HLO_MATCHER(Remainder);
 HLO_MATCHER(Reshape);
 HLO_MATCHER(Reverse);
 HLO_MATCHER(Rng);
+HLO_MATCHER(Scatter);
 HLO_MATCHER(Select);
 HLO_MATCHER(SelectAndScatter);
 HLO_MATCHER(Send);
@@ -228,6 +235,7 @@ HLO_MATCHER(Tanh);
 HLO_MATCHER(Trace);
 HLO_MATCHER(Transpose);
 HLO_MATCHER(Tuple);
+HLO_MATCHER(TupleSelect);
 HLO_MATCHER(While);
 
 // The special cases below let you check additional information about the
@@ -303,7 +311,7 @@ inline ::testing::Matcher<const ::xla::HloInstruction*> Shape(
   return ::testing::MakeMatcher(new ::xla::testing::HloShapeMatcher(shape));
 }
 inline ::testing::Matcher<const ::xla::HloInstruction*> Shape(
-    tensorflow::StringPiece shape) {
+    absl::string_view shape) {
   return ::testing::MakeMatcher(new ::xla::testing::HloShapeMatcher(
       ShapeUtil::ParseShapeString(shape).ValueOrDie()));
 }
@@ -313,7 +321,7 @@ inline ::testing::Matcher<const ::xla::HloInstruction*> ShapeWithLayout(
       new ::xla::testing::HloShapeAndLayoutMatcher(shape));
 }
 inline ::testing::Matcher<const ::xla::HloInstruction*> ShapeWithLayout(
-    tensorflow::StringPiece shape) {
+    absl::string_view shape) {
   return ::testing::MakeMatcher(new ::xla::testing::HloShapeAndLayoutMatcher(
       ShapeUtil::ParseShapeString(shape).ValueOrDie()));
 }
@@ -324,10 +332,16 @@ inline ::testing::Matcher<const ::xla::HloInstruction*> Sharding(
   return ::testing::MakeMatcher(
       new ::xla::testing::HloShardingMatcher(sharding));
 }
+// Matcher for Sharding from sharding string
+inline ::testing::Matcher<const ::xla::HloInstruction*> Sharding(
+    absl::string_view sharding) {
+  return ::testing::MakeMatcher(new ::xla::testing::HloShardingMatcher(
+      ParseSharding(sharding).ValueOrDie()));
+}
 // Verifies that no HloSharding is set for an HLO instruction.
 inline ::testing::Matcher<const ::xla::HloInstruction*> NoSharding() {
   return ::testing::MakeMatcher(
-      new ::xla::testing::HloShardingMatcher(tensorflow::gtl::nullopt));
+      new ::xla::testing::HloShardingMatcher(absl::nullopt));
 }
 
 inline ::testing::Matcher<const ::xla::HloInstruction*> Dot(
@@ -371,7 +385,6 @@ std::vector<const HloInstruction*> Pointers(const Container& container) {
 // Tell GMock to print HloInstruction* by value, so error messages are nice.
 // Has to be in the same namespace as 'HloInstruction'.
 void PrintTo(const HloInstruction* inst, ::std::ostream* os);
-void PrintTo(HloInstruction* inst, ::std::ostream* os);
 
 }  // namespace xla
 

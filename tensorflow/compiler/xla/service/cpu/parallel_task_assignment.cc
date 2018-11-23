@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/cpu/parallel_task_assignment.h"
 
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
 #include "tensorflow/compiler/xla/service/cpu/dot_op_emitter.h"
 #include "tensorflow/compiler/xla/service/cpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/cpu/shape_partition.h"
@@ -38,7 +40,7 @@ class SimpleCostModel : public ParallelCostModel {
     const int64 min_cost_per_thread = 256LL << 10;  // 256KB L2 Cache size.
     // Return target parallel task count in [1, max_parallelism_].
     return std::min(max_parallelism_,
-                    std::max(1LL, instruction_cost / min_cost_per_thread));
+                    std::max(int64{1}, instruction_cost / min_cost_per_thread));
   }
 
  private:
@@ -63,7 +65,7 @@ class DefaultCostModel : public ParallelCostModel {
     int64 max_parallelism;
     // Calculate flops-to-bytes-ratio for 'instruction'.
     const int64 bytes_accessed =
-        std::max(1LL, cost_analysis_->bytes_accessed(*instruction));
+        std::max(int64{1}, cost_analysis_->bytes_accessed(*instruction));
     const float flops_to_bytes_ratio =
         cost_analysis_->flop_count(*instruction) /
         static_cast<float>(bytes_accessed);
@@ -93,7 +95,7 @@ class DefaultCostModel : public ParallelCostModel {
     }
     // Return target parallel task count in [1, max_parallelism_].
     return std::min(max_parallelism,
-                    std::max(1LL, instruction_cost / min_cost_per_thread));
+                    std::max(int64{1}, instruction_cost / min_cost_per_thread));
   }
 
  private:
@@ -109,7 +111,7 @@ ParallelTaskAssignment::ParallelTaskAssignment(
     : target_machine_features_(*target_machine_features) {
   VLOG(1) << "ParallelTaskAssignment max_parallelism: " << max_parallelism;
   // Run cost analysis on 'module'.
-  auto cost_analysis = MakeUnique<HloCostAnalysis>(shape_size);
+  auto cost_analysis = absl::make_unique<HloCostAnalysis>(shape_size);
   HloComputation* computation = module->entry_computation();
   Status status = computation->root_instruction()->Accept(cost_analysis.get());
   if (status.ok()) {
@@ -140,6 +142,7 @@ int64 ParallelTaskAssignment::GetTargetParallelTaskCount(
       opcode == HloOpcode::kGetTupleElement || opcode == HloOpcode::kBitcast ||
       opcode == HloOpcode::kFft || opcode == HloOpcode::kInfeed ||
       opcode == HloOpcode::kOutfeed || opcode == HloOpcode::kRng ||
+      opcode == HloOpcode::kSort ||
       (opcode == HloOpcode::kConvolution &&
        PotentiallyImplementedAsEigenConvolution(*instruction,
                                                 target_machine_features_)) ||
@@ -216,8 +219,7 @@ bool ParallelTaskAssigner::AssignParallelTasksHelper(
 
     // Outline 'instruction' in 'computation' for parallel task assignment.
     auto* call = module->OutlineExpressionFromComputation(
-        {instruction},
-        tensorflow::strings::StrCat("parallel_", instruction->name()),
+        {instruction}, absl::StrCat("parallel_", instruction->name()),
         computation);
 
     // Set assigned dimension partitioning to 'instruction'.

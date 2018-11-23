@@ -31,8 +31,12 @@ Follow either of the two links above to access the appropriate CLA and instructi
 If you have improvements to TensorFlow, send us your pull requests! For those
 just getting started, Github has a [howto](https://help.github.com/articles/using-pull-requests/).
 
-TensorFlow team members will be assigned to review your pull requests. Once the pull requests are approved and pass continuous integration checks, we will merge the pull requests.
-For some pull requests, we will apply the patch for each pull request to our internal version control system first, and export the change out as a new commit later, at which point the original pull request will be closed. The commits in the pull request will be squashed into a single commit with the pull request creator as the author. These pull requests will be labeled as pending merge internally.
+TensorFlow team members will be assigned to review your pull requests. Once the
+pull requests are approved and pass continuous integration checks, a TensorFlow
+team member will apply `ready to pull` label to your change. This means we are
+working on getting your pull request submitted to our internal repository. After
+the change has been submitted internally, your pull request will be merged
+automatically on GitHub.
 
 If you want to contribute but you're not sure where to start, take a look at the
 [issues with the "contributions welcome" label](https://github.com/tensorflow/tensorflow/labels/stat%3Acontributions%20welcome).
@@ -90,7 +94,7 @@ Bazel BUILD files also need to include a license section, e.g.,
 Changes to TensorFlow C++ code should conform to
 [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 
-Use `clang-tidy` to check your C/C++ changes. To install clang-tidy on ubuntu:16.04, do:
+Use `clang-tidy` to check your C/C++ changes. To install `clang-tidy` on ubuntu:16.04, do:
 
 ```bash
 apt-get install -y clang-tidy
@@ -107,7 +111,7 @@ diff <my_cc_file> /tmp/my_cc_file.cc
 #### Python coding style
 
 Changes to TensorFlow Python code should conform to
-[Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)
+[Google Python Style Guide](https://github.com/google/styleguide/blob/gh-pages/pyguide.md)
 
 Use `pylint` to check your Python changes. To install `pylint` and
 retrieve TensorFlow's custom style definition:

@@ -160,12 +160,19 @@ class Bijector(object):
 
   3. `log_det_jacobian(x)`
 
-     "The log of the determinant of the matrix of all first-order partial
-     derivatives of the inverse function."
+     "The log of the absolute value of the determinant of the matrix of all
+     first-order partial derivatives of the inverse function."
 
      Useful for inverting a transformation to compute one probability in terms
      of another. Geometrically, the Jacobian determinant is the volume of the
      transformation and is used to scale the probability.
+
+     We take the absolute value of the determinant before log to avoid NaN
+     values.  Geometrically, a negative determinant corresponds to an
+     orientation-reversing transformation.  It is ok for us to discard the sign
+     of the determinant because we only integrate everywhere-nonnegative
+     functions (probability densities) and the correct orientation is always the
+     one that produces a nonnegative integrand.
 
   By convention, transformations of random variables are named in terms of the
   forward transformation. The forward transformation creates samples, the
@@ -818,10 +825,21 @@ class Bijector(object):
           min_event_ndims=self.inverse_min_event_ndims,
           event_ndims=event_ndims)):
         if not self._is_injective:  # No caching for non-injective
-          ildjs = self._inverse_log_det_jacobian(y, **kwargs)
-          return tuple(self._reduce_jacobian_det_over_event(
-              y, ildj, self.inverse_min_event_ndims, event_ndims)
-                       for ildj in ildjs)
+          try:
+            ildjs = self._inverse_log_det_jacobian(y, **kwargs)
+            return tuple(self._reduce_jacobian_det_over_event(
+                y, ildj, self.inverse_min_event_ndims, event_ndims)
+                         for ildj in ildjs)
+          except NotImplementedError as original_exception:
+            try:
+              x = self._inverse(y, **kwargs)
+              fldjs = self._forward_log_det_jacobian(x, **kwargs)
+              return tuple(self._reduce_jacobian_det_over_event(
+                  x, -fldj, self.forward_min_event_ndims, event_ndims)
+                           for fldj in fldjs)
+            except NotImplementedError:
+              raise original_exception
+
         mapping = self._lookup(y=y, kwargs=kwargs)
         if mapping.ildj_map is not None and event_ndims in mapping.ildj_map:
           return mapping.ildj_map[event_ndims]
@@ -910,11 +928,21 @@ class Bijector(object):
           return -1. * self._constant_ildj_map[event_ndims]
         x = ops.convert_to_tensor(x, name="x")
         self._maybe_assert_dtype(x)
-        if not self._is_injective:
-          fldjs = self._forward_log_det_jacobian(x, **kwargs)  # No caching.
-          return tuple(self._reduce_jacobian_det_over_event(
-              x, fldj, self.forward_min_event_ndims, event_ndims)
-                       for fldj in fldjs)
+        if not self._is_injective:  # No caching for non-injective
+          try:
+            fldjs = self._forward_log_det_jacobian(x, **kwargs)  # No caching.
+            return tuple(self._reduce_jacobian_det_over_event(
+                x, fldj, self.forward_min_event_ndims, event_ndims)
+                         for fldj in fldjs)
+          except NotImplementedError as original_exception:
+            try:
+              y = self._forward(x, **kwargs)
+              ildjs = self._inverse_log_det_jacobian(y, **kwargs)
+              return tuple(self._reduce_jacobian_det_over_event(
+                  y, -ildj, self.inverse_min_event_ndims, event_ndims)
+                           for ildj in ildjs)
+            except NotImplementedError:
+              raise original_exception
         mapping = self._lookup(x=x, kwargs=kwargs)
         if mapping.ildj_map is not None and event_ndims in mapping.ildj_map:
           return -mapping.ildj_map[event_ndims]
@@ -1004,12 +1032,6 @@ class Bijector(object):
   def _reduce_jacobian_det_over_event(
       self, y, ildj, min_event_ndims, event_ndims):
     """Reduce jacobian over event_ndims - min_event_ndims."""
-
-    if not self.is_constant_jacobian:
-      return math_ops.reduce_sum(
-          ildj,
-          self._get_event_reduce_dims(min_event_ndims, event_ndims))
-
     # In this case, we need to tile the Jacobian over the event and reduce.
     y_rank = array_ops.rank(y)
     y_shape = array_ops.shape(y)[
@@ -1021,7 +1043,7 @@ class Bijector(object):
         axis=self._get_event_reduce_dims(min_event_ndims, event_ndims))
     # The multiplication by ones can change the inferred static shape so we try
     # to recover as much as possible.
-    event_ndims_ = self._maybe_get_event_ndims_statically(event_ndims)
+    event_ndims_ = self._maybe_get_static_event_ndims(event_ndims)
     if (event_ndims_ is not None and
         y.shape.ndims is not None and
         ildj.shape.ndims is not None):
@@ -1036,7 +1058,7 @@ class Bijector(object):
 
   def _get_event_reduce_dims(self, min_event_ndims, event_ndims):
     """Compute the reduction dimensions given event_ndims."""
-    event_ndims_ = self._maybe_get_event_ndims_statically(event_ndims)
+    event_ndims_ = self._maybe_get_static_event_ndims(event_ndims)
 
     if event_ndims_ is not None:
       return [-index for index in range(1, event_ndims_ - min_event_ndims + 1)]
@@ -1046,9 +1068,18 @@ class Bijector(object):
 
   def _check_valid_event_ndims(self, min_event_ndims, event_ndims):
     """Check whether event_ndims is atleast min_event_ndims."""
-    event_ndims_ = self._maybe_get_event_ndims_statically(event_ndims)
+    event_ndims = ops.convert_to_tensor(event_ndims, name="event_ndims")
+    event_ndims_ = tensor_util.constant_value(event_ndims)
     assertions = []
+
+    if not event_ndims.dtype.is_integer:
+      raise ValueError("Expected integer dtype, got dtype {}".format(
+          event_ndims.dtype))
+
     if event_ndims_ is not None:
+      if event_ndims.shape.ndims != 0:
+        raise ValueError("Expected scalar event_ndims, got shape {}".format(
+            event_ndims.shape))
       if min_event_ndims > event_ndims_:
         raise ValueError("event_ndims ({}) must be larger than "
                          "min_event_ndims ({})".format(
@@ -1056,17 +1087,29 @@ class Bijector(object):
     elif self.validate_args:
       assertions += [
           check_ops.assert_greater_equal(event_ndims, min_event_ndims)]
+
+    if event_ndims.shape.is_fully_defined():
+      if event_ndims.shape.ndims != 0:
+        raise ValueError("Expected scalar shape, got ndims {}".format(
+            event_ndims.shape.ndims))
+
+    elif self.validate_args:
+      assertions += [
+          check_ops.assert_rank(event_ndims, 0, message="Expected scalar.")]
     return assertions
 
-  def _maybe_get_event_ndims_statically(self, event_ndims):
+  def _maybe_get_static_event_ndims(self, event_ndims):
     """Helper which returns tries to return an integer static value."""
     event_ndims_ = distribution_util.maybe_get_static_value(event_ndims)
 
-    if isinstance(event_ndims_, np.ndarray):
-      if (event_ndims_.dtype not in (np.int32, np.int64) or
-          len(event_ndims_.shape)):
+    if isinstance(event_ndims_, (np.generic, np.ndarray)):
+      if event_ndims_.dtype not in (np.int32, np.int64):
+        raise ValueError("Expected integer dtype, got dtype {}".format(
+            event_ndims_.dtype))
+
+      if isinstance(event_ndims_, np.ndarray) and len(event_ndims_.shape):
         raise ValueError("Expected a scalar integer, got {}".format(
             event_ndims_))
-      event_ndims_ = event_ndims_.tolist()
+      event_ndims_ = int(event_ndims_)
 
     return event_ndims_

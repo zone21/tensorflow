@@ -54,7 +54,7 @@ native_sampler = random_ops.multinomial
 
 class MultinomialTest(test.TestCase):
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testSmallEntropy(self):
     random_seed.set_random_seed(1618)
     for output_dtype in [np.int32, np.int64]:
@@ -197,7 +197,7 @@ class MultinomialTest(test.TestCase):
     with self.test_session(use_gpu=True):
       x = random_ops.multinomial(array_ops.zeros([5, 0]), 7)
       with self.assertRaisesOpError("num_classes should be positive"):
-        x.eval()
+        self.evaluate(x)
 
   def testNegativeMinLogits(self):
     random_seed.set_random_seed(78844)

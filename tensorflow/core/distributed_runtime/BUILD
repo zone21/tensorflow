@@ -15,7 +15,7 @@ filegroup(
     ]),
 )
 
-load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_cuda_library")
 load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_test")
 load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_tests")
 load("//tensorflow:tensorflow.bzl", "tf_copts")
@@ -145,9 +145,11 @@ tf_cc_test(
     deps = [
         ":session_mgr",
         ":worker_env",
+        "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
         "//tensorflow/core/distributed_runtime/rpc:rpc_rendezvous_mgr",
     ],
 )
@@ -187,7 +189,7 @@ cc_library(
     ],
 )
 
-cc_library(
+tf_cuda_library(
     name = "worker",
     srcs = ["worker.cc"],
     hdrs = [
@@ -202,6 +204,7 @@ cc_library(
         ":worker_interface",
         ":worker_session",
         "//tensorflow/core:core_cpu_internal",
+        "//tensorflow/core:device_tracer",
         "//tensorflow/core:lib_internal",
     ],
 )
@@ -223,6 +226,17 @@ tf_cc_test(
         ":call_options",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+    ],
+)
+
+cc_library(
+    name = "cancellable_call",
+    hdrs = ["cancellable_call.h"],
+    deps = [
+        ":call_options",
+        ":worker_cache",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
     ],
 )
 
@@ -392,6 +406,7 @@ cc_library(
     hdrs = ["master_env.h"],
     deps = [
         ":worker_cache",
+        "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:session_options",
     ],
@@ -452,11 +467,60 @@ cc_library(
     ],
 )
 
+tf_cc_test(
+    name = "server_lib_test",
+    srcs = ["server_lib_test.cc"],
+    deps = [
+        ":server_lib",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+    ],
+)
+
+cc_library(
+    name = "rpc_collective_executor_mgr",
+    srcs = ["rpc_collective_executor_mgr.cc"],
+    hdrs = ["rpc_collective_executor_mgr.h"],
+    deps = [
+        ":base_rendezvous_mgr",
+        ":collective_param_resolver_distributed",
+        ":collective_rma_distributed",
+        ":device_resolver_distributed",
+        ":worker_cache",
+        "//tensorflow/core:core_cpu_internal",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:worker_proto_cc",
+    ],
+)
+
+tf_cc_test(
+    name = "rpc_collective_executor_mgr_test",
+    srcs = ["rpc_collective_executor_mgr_test.cc"],
+    deps = [
+        ":collective_param_resolver_distributed",
+        ":device_resolver_distributed",
+        ":rpc_collective_executor_mgr",
+        "//tensorflow/core:core_cpu_internal",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:session_options",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:worker_proto_cc",
+    ],
+)
+
 cc_library(
     name = "collective_rma_distributed",
     srcs = ["collective_rma_distributed.cc"],
     hdrs = ["collective_rma_distributed.h"],
     deps = [
+        ":cancellable_call",
+        ":request_id",
         ":worker_cache",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
@@ -492,6 +556,7 @@ cc_library(
     hdrs = ["collective_param_resolver_distributed.h"],
     deps = [
         ":call_options",
+        ":cancellable_call",
         ":device_resolver_distributed",
         ":worker_cache",
         "//tensorflow/core:core_cpu_internal",
@@ -509,6 +574,7 @@ cc_library(
     deps = [
         ":worker_cache",
         ":worker_interface",
+        "//tensorflow/core:framework",
     ],
 )
 
@@ -561,21 +627,24 @@ tf_cc_test(
     ],
 )
 
-# TODO(mrry): Move executor_test.cc to ../common_runtime when once it no longer depends
-# on grpc_testlib.
-tf_cuda_cc_tests(
-    name = "executor_tests",
+tf_cuda_cc_test(
+    name = "master_test",
     size = "medium",
     srcs = [
-        "executor_test.cc",
-        #"master_test.cc",  # TODO(b/27683709): Re-enable when not flaky.
+        "master_test.cc",
     ],
     linkstatic = tf_kernel_tests_linkstatic(),
-    tags = tf_cuda_tests_tags(),
+    tags = tf_cuda_tests_tags() + [
+        "manual",  # TODO(b/27683709): Re-enable when not flaky.
+        "notap",  # TODO(b/27683709): Re-enable when not flaky.
+        "noguitar",  # TODO(b/27683709): Re-enable when not flaky.
+        "nooss",  # TODO(b/27683709): Re-enable when not flaky.
+    ],
     deps = [
         ":master",
         ":remote_device",
         ":worker_interface",
+        "//tensorflow:grpc++",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
@@ -588,6 +657,7 @@ tf_cuda_cc_tests(
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
         "//tensorflow/core/distributed_runtime/rpc:grpc_channel",
+        "//tensorflow/core/distributed_runtime/rpc:grpc_master_service_impl",
         "//tensorflow/core/distributed_runtime/rpc:grpc_testlib",
         "//tensorflow/core/distributed_runtime/rpc:grpc_util",
         "//tensorflow/core/distributed_runtime/rpc:grpc_worker_cache",
@@ -596,7 +666,6 @@ tf_cuda_cc_tests(
         "//tensorflow/core/kernels:dense_update_ops",
         "//tensorflow/core/kernels:identity_op",
         "//tensorflow/core/kernels:variable_ops",
-        "@grpc//:grpc++_unsecure",
     ],
 )
 
@@ -614,6 +683,7 @@ tf_cuda_cc_test(
         ":master",
         ":remote_device",
         ":worker_interface",
+        "//tensorflow:grpc++",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
@@ -629,7 +699,6 @@ tf_cuda_cc_test(
         "//tensorflow/core/distributed_runtime/rpc:grpc_testlib",
         "//tensorflow/core/distributed_runtime/rpc:grpc_util",
         "//tensorflow/core/distributed_runtime/rpc:grpc_worker_cache",
-        "@grpc//:grpc++_unsecure",
     ],
 )
 
@@ -648,10 +717,10 @@ tf_cuda_cc_test(
         "//tensorflow/core:tensorflow",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
         "//tensorflow/core/distributed_runtime:server_lib",
         "//tensorflow/core/distributed_runtime/rpc:grpc_server_lib",
         "//tensorflow/core/distributed_runtime/rpc:grpc_session",
-        "//tensorflow/core/distributed_runtime/rpc:grpc_testlib_ops",
         "//tensorflow/core/kernels:aggregate_ops",
         "//tensorflow/core/kernels:array",
     ],

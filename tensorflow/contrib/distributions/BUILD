@@ -16,9 +16,15 @@ load("//tensorflow:tensorflow.bzl", "cuda_py_test")
 py_library(
     name = "bijectors_py",
     srcs = glob(["python/ops/bijectors/*.py"]),
+    deprecation = ("TensorFlow Distributions has migrated to " +
+                   "TensorFlow Probability " +
+                   "(https://github.com/tensorflow/probability). " +
+                   "Deprecated copies remaining in tf.contrib.distributions " +
+                   "are unmaintained, unsupported, and will be removed by " +
+                   "late 2018. You should update all usage of " +
+                   "`tf.contrib.distributions` to `tfp.distributions`."),
     srcs_version = "PY2AND3",
     deps = [
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:check_ops",
         "//tensorflow/python:clip_ops",
@@ -42,12 +48,18 @@ py_library(
 py_library(
     name = "distributions_py",
     srcs = ["__init__.py"] + glob(["python/ops/*.py"]),
+    deprecation = ("TensorFlow Distributions has migrated to " +
+                   "TensorFlow Probability " +
+                   "(https://github.com/tensorflow/probability). " +
+                   "Deprecated copies remaining in tf.contrib.distributions " +
+                   "are unmaintained, unsupported, and will be removed by " +
+                   "late 2018. You should update all usage of " +
+                   "`tf.contrib.distributions` to `tfp.distributions`."),
     srcs_version = "PY2AND3",
     deps = [
         ":bijectors_py",
         "//tensorflow/contrib/framework:framework_py",
         "//tensorflow/contrib/learn",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:check_ops",
         "//tensorflow/python:control_flow_ops",
@@ -60,7 +72,6 @@ py_library(
         "//tensorflow/python:nn",
         "//tensorflow/python:nn_ops",
         "//tensorflow/python:random_ops",
-        "//tensorflow/python:spectral_ops",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:tensor_util",
         "//tensorflow/python:util",
@@ -68,6 +79,7 @@ py_library(
         "//tensorflow/python:variables",
         "//tensorflow/python/ops/distributions",
         "//tensorflow/python/ops/linalg",
+        "//tensorflow/python/ops/signal",
         "//third_party/py/numpy",
         "@six_archive//:six",
     ],
@@ -110,7 +122,7 @@ cuda_py_test(
 
 cuda_py_test(
     name = "conditional_distribution_test",
-    size = "small",
+    size = "medium",
     srcs = [
         "python/kernel_tests/conditional_distribution_test.py",
         "python/kernel_tests/distribution_test.py",
@@ -152,6 +164,7 @@ cuda_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:platform_test",
     ],
+    tags = ["notap"],
 )
 
 cuda_py_test(
@@ -286,7 +299,7 @@ cuda_py_test(
 
 cuda_py_test(
     name = "mvn_diag_test",
-    size = "small",
+    size = "medium",
     srcs = ["python/kernel_tests/mvn_diag_test.py"],
     additional_deps = [
         ":distributions_py",
@@ -431,7 +444,7 @@ cuda_py_test(
 
 cuda_py_test(
     name = "sinh_arcsinh_test",
-    size = "small",
+    size = "medium",
     srcs = ["python/kernel_tests/sinh_arcsinh_test.py"],
     additional_deps = [
         ":distributions_py",
@@ -691,8 +704,8 @@ cuda_py_test(
         ":bijectors_py",
         ":distributions_py",
         "//third_party/py/numpy",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
@@ -707,8 +720,8 @@ cuda_py_test(
     additional_deps = [
         ":distributions_py",
         "//third_party/py/numpy",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python/ops/linalg",
     ],
     shard_count = 4,
     tags = ["noasan"],  # times out, http://b/78588814
@@ -724,8 +737,8 @@ cuda_py_test(
     additional_deps = [
         ":distributions_py",
         "//third_party/py/numpy",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
@@ -779,8 +792,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -816,8 +829,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -837,8 +850,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -856,8 +869,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -892,8 +905,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -911,10 +924,10 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
@@ -930,8 +943,27 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:math_ops",
+        "//tensorflow/python:platform_test",
+    ],
+)
+
+cuda_py_test(
+    name = "fill_triangular_test",
+    size = "small",
+    srcs = ["python/kernel_tests/bijectors/fill_triangular_test.py"],
+    additional_deps = [
+        ":bijectors_py",
+        ":distributions_py",
+        "//third_party/py/numpy",
+        "@six_archive//:six",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -949,8 +981,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -968,8 +1000,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -987,8 +1019,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1006,8 +1038,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1028,6 +1060,25 @@ cuda_py_test(
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:platform_test",
+    ],
+)
+
+cuda_py_test(
+    name = "matrix_inverse_tril_test",
+    size = "medium",
+    srcs = ["python/kernel_tests/bijectors/matrix_inverse_tril_test.py"],
+    additional_deps = [
+        ":bijectors_py",
+        ":distributions_py",
+        "//third_party/py/numpy",
+        "@six_archive//:six",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
     ],
 )
@@ -1073,8 +1124,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1100,6 +1151,25 @@ cuda_py_test(
 )
 
 cuda_py_test(
+    name = "scale_tril_test",
+    size = "small",
+    srcs = ["python/kernel_tests/bijectors/scale_tril_test.py"],
+    additional_deps = [
+        ":bijectors_py",
+        ":distributions_py",
+        "//third_party/py/numpy",
+        "@six_archive//:six",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:math_ops",
+        "//tensorflow/python:platform_test",
+    ],
+)
+
+cuda_py_test(
     name = "sigmoid_test",
     size = "small",
     srcs = ["python/kernel_tests/bijectors/sigmoid_test.py"],
@@ -1108,8 +1178,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1129,8 +1199,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1149,8 +1219,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1168,8 +1238,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1187,8 +1257,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1206,8 +1276,27 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:math_ops",
+        "//tensorflow/python:platform_test",
+    ],
+)
+
+cuda_py_test(
+    name = "transform_diagonal_test",
+    size = "small",
+    srcs = ["python/kernel_tests/bijectors/transform_diagonal_test.py"],
+    additional_deps = [
+        ":bijectors_py",
+        ":distributions_py",
+        "//third_party/py/numpy",
+        "@six_archive//:six",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -1225,8 +1314,8 @@ cuda_py_test(
         ":distributions_py",
         "//third_party/py/numpy",
         "@six_archive//:six",
-        "//tensorflow/contrib/linalg:linalg_py",
         "//tensorflow/python:array_ops",
+        "//tensorflow/python/ops/linalg",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
